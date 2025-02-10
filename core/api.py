@@ -11,7 +11,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from core.completion.openai_completion import OpenAICompletionModel
 from core.embedding.ollama_embedding_model import OllamaEmbeddingModel
 from core.models.request import RetrieveRequest, CompletionQueryRequest, IngestTextRequest
-from core.models.documents import Document, DocumentResult, ChunkResult
+from core.models.documents import Document, DocumentResult, ChunkResult, DeleteResponse
 from core.models.auth import AuthContext, EntityType
 from core.parser.combined_parser import CombinedParser
 from core.completion.base_completion import CompletionResponse
@@ -456,23 +456,32 @@ async def get_document(document_id: str, auth: AuthContext = Depends(verify_toke
         raise e
     
 
-@app.delete("/documents/{external_id}", response_model=bool)
+@app.delete("/documents/{external_id}", response_model=DeleteResponse)
 async def delete_document(
     external_id: str, auth: AuthContext = Depends(verify_token)
-) -> bool:
+) -> DeleteResponse: 
     """Delete a document and its chunks by external_id."""
     try:
-
         # Delete the document and its chunks
-        success = await document_service.delete_document_and_chunks(external_id, auth)
-        if not success:
-            raise HTTPException(status_code=404, detail="Document not found")
-        logger.info(f"Deleted all data for document {external_id}")
+        response = await document_service.delete_document_and_chunks(external_id, auth)  # Capture response
+        
+        if not response.get("status"):  # Check if response indicates failure
+            # If the document is not found, return a 404 with a specific message
+            if response["message"] == "Document not found":
+                raise HTTPException(status_code=404, detail=response["message"]) 
+            # Handle other failure cases if needed
+            raise HTTPException(status_code=400, detail=response["message"])  # Example for other failures
 
-        return True
+        logger.info(f"Deleted all data for document {external_id}")
+        return response  # Return the structured response
+
+    except HTTPException as http_ex:
+        # Re-raise HTTP exceptions to maintain the status code and detail
+        logger.error(f"HTTP error: {http_ex.detail}")
+        raise http_ex
     except Exception as e:
-        logger.error(f"Error deleteing document: {e}")
-        raise e
+        logger.error(f"Error deleting document: {e}")  # Log the detailed error
+        raise HTTPException(status_code=500, detail="Internal Server Error")  # Generic error message
 
 
 # Usage tracking endpoints

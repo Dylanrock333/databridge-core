@@ -1,6 +1,7 @@
 import base64
 from typing import Dict, Any, List, Optional
 from fastapi import UploadFile
+from datetime import datetime, timezone 
 
 from core.models.chunk import Chunk, DocumentChunk
 from core.models.documents import (
@@ -387,20 +388,20 @@ class DocumentService:
         logger.info(f"Created {len(results)} document results")
         return results
 
-    async def delete_document_and_chunks(self, external_id: str, auth: AuthContext) -> bool:
+    async def delete_document_and_chunks(self, external_id: str, auth: AuthContext) -> Optional[Dict[str, Any]]:
         """Delete a document and its associated chunks."""
         # Confirm document exists in database through external_id
         document = await self.db.get_document(external_id, auth)
         if not document:
             logger.warning(f"Document {external_id} not found")
-            return False
+            return {"status": False, "message": "Document not found"}
         logger.info(f"Found document {external_id}")
         
         # Confirm vector embeddings chunks exist in vector store database throught external_id
         count = await self.vector_store.count_number_of_chunks(external_id)
         if count == 0:
             logger.warning(f"No chunks found for document {external_id}")
-            return False
+            return {"status": False, "message": "No chunks found for document"} 
         logger.info(f"Found {count} chunks for document {external_id}")
 
         # Delete document from the database
@@ -410,19 +411,28 @@ class DocumentService:
         
         if not document_deleted:
             logger.error(f"Failed to delete document {external_id}")
-            return False
+            return {"status": False, "message": "Failed to delete document"}
         logger.info(f"Deleted document {external_id}")
 
         # Delete associated chunks from the vector store
         deleted_count = await self.vector_store.delete_chunks(external_id)
         if deleted_count != count:
             logger.error(f"Mismatch in chunk deletion count for document {external_id}: expected {count}, deleted {deleted_count}")
-            return False
+            return {"status": False, "message": "Failed to delete chunks"}
         logger.info(f"Deleted {deleted_count} chunks for document {external_id}")
 
-        #TODO: Return the document model that was deleted
-        return True
+        # Prepare the response data structure
+        response = {
+            "status": True,
+            "external_id": document.external_id,
+            "content_type": document.content_type,
+            "filename": document.filename,
+            "deleted_at": datetime.now(timezone.utc),  # Current time as deleted_at
+            "chunk_ids": document.chunk_ids,  # List of chunk IDs
+        }
 
+        return response  # Return the structured response
+    
     async def create_cache(
         self,
         name: str,

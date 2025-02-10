@@ -65,7 +65,15 @@ class DocumentContent(BaseModel):
             raise ValueError("filename is required when type is url")
         return v
 
-
+class DeleteResponse(BaseModel):
+    status: bool
+    message: Optional[str] = None
+    external_id: Optional[str] = None
+    content_type: Optional[str] = None
+    filename: Optional[str] = None
+    deleted_at: Optional[datetime] = None
+    chunk_ids: Optional[List[str]] = None
+       
 class DocumentResult(BaseModel):
     """Query result at document level"""
 
