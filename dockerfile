@@ -57,6 +57,8 @@ ENV HOST=0.0.0.0
 ENV PORT=8000
 ENV PATH="/usr/local/bin:$PATH"
 
+ENV WATCHFILES_FORCE_POLLING=true
+
 # Create default configuration
 RUN echo '[api]\n\
 host = "0.0.0.0"\n\
@@ -139,6 +141,8 @@ check_postgres\n\
 # Start the application with standard asyncio event loop\n\
 exec uvicorn core.api:app --host $HOST --port $PORT --loop asyncio --http auto --ws auto --lifespan auto\n\
 ' > /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
+
+RUN sed -i 's/--loop asyncio/--reload --loop asyncio/' /app/docker-entrypoint.sh
 
 # Copy application code
 COPY core ./core

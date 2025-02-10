@@ -16,6 +16,8 @@ services:
       - ./storage:/app/storage
       - ./logs:/app/logs
       - ./databridge.toml:/app/databridge.toml
+      - ./core:/app/core
+      - ./requirements.txt:/app/requirements.txt
     depends_on:
       postgres:
         condition: service_healthy

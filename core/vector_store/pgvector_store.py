@@ -2,7 +2,7 @@ from typing import List, Optional, Tuple
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, String, Integer, Index, select, text
+from sqlalchemy import Column, String, Integer, Index, select, text, delete
 from sqlalchemy.sql.expression import func
 from sqlalchemy.types import UserDefinedType
 
@@ -178,3 +178,29 @@ class PGVectorStore(BaseVectorStore):
         except Exception as e:
             logger.error(f"Error querying similar chunks: {str(e)}")
             return []
+        
+    async def count_number_of_chunks(self, external_id: str) -> int:
+        """Count the number of chunks for a given document."""
+        try:
+            async with self.async_session() as session:
+                result = await session.execute(
+                    select(func.count(VectorEmbedding.id)).where(VectorEmbedding.document_id == external_id)
+                )
+                count = result.scalar_one_or_none()
+                return count or 0  # Return 0 if count is None
+        except Exception as e:
+            logger.error(f"Error counting chunks: {str(e)}")
+            return 0
+        
+    async def delete_chunks(self, document_id: str) -> bool:
+        """Delete all chunks for a given document and return the number of deleted items."""
+        try:
+            async with self.async_session() as session:
+                result = await session.execute(
+                    delete(VectorEmbedding).where(VectorEmbedding.document_id == document_id)
+                )
+                await session.commit()
+                return result.rowcount  # Return the number of rows deleted
+        except Exception as e:
+            logger.error(f"Error deleting chunks: {str(e)}")
+            return 0

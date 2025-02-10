@@ -18,3 +18,13 @@ class BaseVectorStore(ABC):
     ) -> List[DocumentChunk]:
         """Find similar chunks"""
         pass
+    
+    @abstractmethod
+    async def count_number_of_chunks(self, external_id: str) -> int:
+        """Count the number of chunks for a given document"""
+        pass
+    
+    @abstractmethod
+    async def delete_chunks(self, external_id: str) -> bool:
+        """Delete chunks by document ID"""
+        pass

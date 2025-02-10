@@ -132,3 +132,21 @@ class MongoDBAtlasVectorStore(BaseVectorStore):
             logger.error(f"MongoDB error: {e._message}")
             logger.error(f"Error querying similar chunks: {str(e)}")
             raise e
+        
+    async def count_number_of_chunks(self, external_id: str) -> int:
+        """Count the number of chunks for a given document."""
+        try:
+            count = await self.collection.count_documents({"document_id": external_id})
+            return count or 0  # Return 0 if count is None
+        except PyMongoError as e:
+            logger.error(f"Error counting chunks: {str(e)}")
+            return 0
+    
+    async def delete_chunks(self, document_id: str) -> bool:
+        """Delete all chunks for a given document."""
+        try:
+            result = await self.collection.delete_many({"document_id": document_id})
+            return result.deleted_count
+        except PyMongoError as e:
+            logger.error(f"Error deleting chunks: {str(e)}")
+            return False

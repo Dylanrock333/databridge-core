@@ -417,6 +417,25 @@ async def get_document(document_id: str, auth: AuthContext = Depends(verify_toke
     except HTTPException as e:
         logger.error(f"Error getting document: {e}")
         raise e
+    
+
+@app.delete("/documents/{external_id}", response_model=bool)
+async def delete_document(
+    external_id: str, auth: AuthContext = Depends(verify_token)
+) -> bool:
+    """Delete a document and its chunks by external_id."""
+    try:
+
+        # Delete the document and its chunks
+        success = await document_service.delete_document_and_chunks(external_id, auth)
+        if not success:
+            raise HTTPException(status_code=404, detail="Document not found")
+        logger.info(f"Deleted all data for document {external_id}")
+
+        return True
+    except Exception as e:
+        logger.error(f"Error deleteing document: {e}")
+        raise e
 
 
 # Usage tracking endpoints
