@@ -462,26 +462,24 @@ async def delete_document(
 ) -> DeleteResponse: 
     """Delete a document and its chunks by external_id."""
     try:
-        # Delete the document and its chunks
-        response = await document_service.delete_document_and_chunks(external_id, auth)  # Capture response
-        
-        if not response.get("status"):  # Check if response indicates failure
-            # If the document is not found, return a 404 with a specific message
-            if response["message"] == "Document not found":
-                raise HTTPException(status_code=404, detail=response["message"]) 
-            # Handle other failure cases if needed
-            raise HTTPException(status_code=400, detail=response["message"])  # Example for other failures
+        async with telemetry.track_operation(
+            operation_type="delete_document",
+            user_id=auth.entity_id,
+            metadata={"external_id": external_id},
+        ):
+            # Delete the document and its chunks
+            response = await document_service.delete_document_and_chunks(external_id, auth)  
+            
+            if not response.get("status"): 
+                if response["message"] == "Document not found":
+                    raise HTTPException(status_code=404, detail=response["message"]) 
+                raise HTTPException(status_code=400, detail="Failed to delete document") 
 
-        logger.info(f"Deleted all data for document {external_id}")
-        return response  # Return the structured response
-
-    except HTTPException as http_ex:
-        # Re-raise HTTP exceptions to maintain the status code and detail
-        logger.error(f"HTTP error: {http_ex.detail}")
-        raise http_ex
+            logger.info(f"Deleted all data for document {external_id}")
+            return response  
     except Exception as e:
-        logger.error(f"Error deleting document: {e}")  # Log the detailed error
-        raise HTTPException(status_code=500, detail="Internal Server Error")  # Generic error message
+        logger.error(f"Error deleting document: {e}") 
+        raise HTTPException(status_code=500, detail="Internal Server Error")  
 
 
 # Usage tracking endpoints
