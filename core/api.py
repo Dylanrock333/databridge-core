@@ -456,26 +456,26 @@ async def get_document(document_id: str, auth: AuthContext = Depends(verify_toke
         raise e
     
 
-@app.delete("/documents/{external_id}", response_model=DeleteResponse)
+@app.delete("/documents/{document_id}", response_model=DeleteResponse)
 async def delete_document(
-    external_id: str, auth: AuthContext = Depends(verify_token)
+    document_id: str, auth: AuthContext = Depends(verify_token)
 ) -> DeleteResponse: 
-    """Delete a document and its chunks by external_id."""
+    """Delete a document and its chunks by document_id."""
     try:
         async with telemetry.track_operation(
             operation_type="delete_document",
             user_id=auth.entity_id,
-            metadata={"external_id": external_id},
+            metadata={"document_id": document_id},
         ):
             # Delete the document and its chunks
-            response = await document_service.delete_document_and_chunks(external_id, auth)  
+            response = await document_service.delete_document_and_chunks(document_id, auth)  
             
             if not response.get("status"): 
                 if response["message"] == "Document not found":
                     raise HTTPException(status_code=404, detail=response["message"]) 
                 raise HTTPException(status_code=400, detail="Failed to delete document") 
 
-            logger.info(f"Deleted all data for document {external_id}")
+            logger.info(f"Deleted all data for document {document_id}")
             return response  
     except Exception as e:
         logger.error(f"Error deleting document: {e}") 
