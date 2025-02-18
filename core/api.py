@@ -231,21 +231,17 @@ document_service = DocumentService(
 
 async def verify_token(authorization: str = Header(None)) -> AuthContext:
     """Verify JWT Bearer token or return dev context if dev_mode is enabled."""
-    # Check if dev mode is enabled
-    if settings.dev_mode:
-        return AuthContext(
-            entity_type=EntityType(settings.dev_entity_type),
-            entity_id=settings.dev_entity_id,
-            permissions=set(settings.dev_permissions),
-        )
 
-    # Normal token verification flow
+    if settings.dev_mode:
+        return AuthContext(user_id="dev_user")
+    
     if not authorization:
         raise HTTPException(
             status_code=401,
             detail="Missing authorization header",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     try:
         if not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Invalid authorization header")
@@ -255,13 +251,13 @@ async def verify_token(authorization: str = Header(None)) -> AuthContext:
 
         if datetime.fromtimestamp(payload["exp"], UTC) < datetime.now(UTC):
             raise HTTPException(status_code=401, detail="Token expired")
+        
+        # Extract user_id from sub claim if it exists, otherwise from user_id
+        user_id = payload.get("sub") or payload.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing user identifier")
+        return AuthContext(user_id=user_id)
 
-        return AuthContext(
-            entity_type=EntityType(payload["type"]),
-            entity_id=payload["entity_id"],
-            app_id=payload.get("app_id"),
-            permissions=set(payload.get("permissions", ["read"])),
-        )
     except jwt.InvalidTokenError as e:
         raise HTTPException(status_code=401, detail=str(e))
 
@@ -289,7 +285,7 @@ async def ingest_text(
     try:
         async with telemetry.track_operation(
             operation_type="ingest_text",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             tokens_used=len(request.content.split()),  # Approximate token count
             metadata={
                 "metadata": request.metadata,
@@ -333,7 +329,7 @@ async def ingest_file(
 
         async with telemetry.track_operation(
             operation_type="ingest_file",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={
                 "filename": file.filename,
                 "content_type": file.content_type,
@@ -342,7 +338,10 @@ async def ingest_file(
             },
         ):
             return await document_service.ingest_file(
-                file=file, metadata=metadata_dict, auth=auth, rules=rules_list
+                file=file, 
+                metadata=metadata_dict, 
+                auth=auth, 
+                rules=rules_list
             )
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
@@ -356,7 +355,7 @@ async def retrieve_chunks(request: RetrieveRequest, auth: AuthContext = Depends(
     try:
         async with telemetry.track_operation(
             operation_type="retrieve_chunks",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={
                 "k": request.k,
                 "min_score": request.min_score,
@@ -381,7 +380,7 @@ async def retrieve_documents(request: RetrieveRequest, auth: AuthContext = Depen
     try:
         async with telemetry.track_operation(
             operation_type="retrieve_docs",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={
                 "k": request.k,
                 "min_score": request.min_score,
@@ -408,7 +407,7 @@ async def query_completion(
     try:
         async with telemetry.track_operation(
             operation_type="query",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={
                 "k": request.k,
                 "min_score": request.min_score,
@@ -464,7 +463,7 @@ async def delete_document(
     try:
         async with telemetry.track_operation(
             operation_type="delete_document",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={"document_id": document_id},
         ):
             # Delete the document and its chunks
@@ -477,6 +476,8 @@ async def delete_document(
 
             logger.info(f"Deleted all data for document {document_id}")
             return response  
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting document: {e}") 
         raise HTTPException(status_code=500, detail="Internal Server Error")  
@@ -486,10 +487,8 @@ async def delete_document(
 @app.get("/usage/stats")
 async def get_usage_stats(auth: AuthContext = Depends(verify_token)) -> Dict[str, int]:
     """Get usage statistics for the authenticated user."""
-    async with telemetry.track_operation(operation_type="get_usage_stats", user_id=auth.entity_id):
-        if not auth.permissions or "admin" not in auth.permissions:
-            return telemetry.get_user_usage(auth.entity_id)
-        return telemetry.get_user_usage(auth.entity_id)
+    async with telemetry.track_operation(operation_type="get_usage_stats", user_id=auth.user_id):
+        return telemetry.get_user_usage(auth.user_id)
 
 
 @app.get("/usage/recent")
@@ -502,21 +501,22 @@ async def get_recent_usage(
     """Get recent usage records."""
     async with telemetry.track_operation(
         operation_type="get_recent_usage",
-        user_id=auth.entity_id,
+        user_id=auth.user_id,
         metadata={
             "operation_type": operation_type,
             "since": since.isoformat() if since else None,
             "status": status,
         },
     ):
-        if not auth.permissions or "admin" not in auth.permissions:
-            records = telemetry.get_recent_usage(
-                user_id=auth.entity_id, operation_type=operation_type, since=since, status=status
-            )
-        else:
-            records = telemetry.get_recent_usage(
-                operation_type=operation_type, since=since, status=status
-            )
+
+        filter_user_id = None if settings.dev_mode else auth.user_id
+        
+        records = telemetry.get_recent_usage(
+            user_id=filter_user_id,
+            operation_type=operation_type,
+            since=since,
+            status=status
+        )
 
         return [
             {
@@ -546,7 +546,7 @@ async def create_cache(
     try:
         async with telemetry.track_operation(
             operation_type="create_cache",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={
                 "name": name,
                 "model": model,
@@ -581,7 +581,7 @@ async def get_cache(name: str, auth: AuthContext = Depends(verify_token)) -> Dic
     try:
         async with telemetry.track_operation(
             operation_type="get_cache",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={"name": name},
         ):
             exists = await document_service.load_cache(name)
@@ -596,7 +596,7 @@ async def update_cache(name: str, auth: AuthContext = Depends(verify_token)) -> 
     try:
         async with telemetry.track_operation(
             operation_type="update_cache",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={"name": name},
         ):
             if name not in document_service.active_caches:
@@ -619,7 +619,7 @@ async def add_docs_to_cache(
     try:
         async with telemetry.track_operation(
             operation_type="add_docs_to_cache",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={"name": name, "docs": docs},
         ):
             cache = document_service.active_caches[name]
@@ -645,7 +645,7 @@ async def query_cache(
     try:
         async with telemetry.track_operation(
             operation_type="query_cache",
-            user_id=auth.entity_id,
+            user_id=auth.user_id,
             metadata={
                 "name": name,
                 "query": query,
@@ -662,19 +662,17 @@ async def query_cache(
 
 @app.post("/local/generate_uri", include_in_schema=True)
 async def generate_local_uri(
-    name: str = Form("admin"),
+    username: str = Form(),
     expiry_days: int = Form(30),
 ) -> Dict[str, str]:
     """Generate a local URI for development. This endpoint is unprotected."""
     try:
         # Clean name
-        name = name.replace(" ", "_").lower()
+        username = username.replace(" ", "_").lower()
 
         # Create payload
         payload = {
-            "type": "developer",
-            "entity_id": name,
-            "permissions": ["read", "write", "admin"],
+            "user_id": username,
             "exp": datetime.now(UTC) + timedelta(days=expiry_days),
         }
 
@@ -689,7 +687,7 @@ async def generate_local_uri(
         )
 
         # Generate URI
-        uri = f"databridge://{name}:{token}@{base_url}"
+        uri = f"databridge://{username}:{token}@{base_url}"
         return {"uri": uri}
     except Exception as e:
         logger.error(f"Error generating local URI: {e}")

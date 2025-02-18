@@ -15,9 +15,7 @@ class Document(BaseModel):
     system_metadata: Dict[str, Any] = Field(
         default_factory=dict, description="System-managed metadata"
     )
-    access_control: Dict[str, Any] = Field(
-        default_factory=dict, description="Access control information"
-    )
+    owner_id: str = Field(..., description="User ID of document owner")
     chunk_ids: List[str] = Field(default_factory=list, description="IDs of document chunks")
 
 

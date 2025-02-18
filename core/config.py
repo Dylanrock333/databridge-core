@@ -28,9 +28,6 @@ class Settings(BaseSettings):
     # Auth configuration
     JWT_ALGORITHM: str
     dev_mode: bool = False
-    dev_entity_type: str = "developer"
-    dev_entity_id: str = "dev_user"
-    dev_permissions: list = ["read", "write", "admin"]
 
     # Completion configuration
     COMPLETION_PROVIDER: Literal["ollama", "openai"]
@@ -108,9 +105,6 @@ def get_settings() -> Settings:
             "JWT_SECRET_KEY", "dev-secret-key"
         ),  # Default for dev mode
         "dev_mode": config["auth"].get("dev_mode", False),
-        "dev_entity_type": config["auth"].get("dev_entity_type", "developer"),
-        "dev_entity_id": config["auth"].get("dev_entity_id", "dev_user"),
-        "dev_permissions": config["auth"].get("dev_permissions", ["read", "write", "admin"]),
     }
 
     # Only require JWT_SECRET_KEY in non-dev mode

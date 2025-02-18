@@ -65,10 +65,10 @@ class BaseDatabase(ABC):
 
     @abstractmethod
     async def check_access(
-        self, document_id: str, auth: AuthContext, required_permission: str = "read"
+        self, document_id: str, auth: AuthContext
     ) -> bool:
         """
-        Check if user has required permission for document.
+        Check if user owns document.
         Returns: True if user has required access, False otherwise
         """
         pass

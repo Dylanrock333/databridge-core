@@ -4,20 +4,18 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- Create documents table
 CREATE TABLE IF NOT EXISTS documents (
     external_id VARCHAR PRIMARY KEY,
-    owner JSONB,
+    owner_id VARCHAR,
     content_type VARCHAR,
     filename VARCHAR,
     doc_metadata JSONB DEFAULT '{}',
     storage_info JSONB DEFAULT '{}',
     system_metadata JSONB DEFAULT '{}',
     additional_metadata JSONB DEFAULT '{}',
-    access_control JSONB DEFAULT '{}',
     chunk_ids JSONB DEFAULT '[]'
 );
 
 -- Create indexes for documents table
 CREATE INDEX IF NOT EXISTS idx_owner_id ON documents USING gin(owner);
-CREATE INDEX IF NOT EXISTS idx_access_control ON documents USING gin(access_control);
 CREATE INDEX IF NOT EXISTS idx_system_metadata ON documents USING gin(system_metadata);
 
 -- Create vector_embeddings table

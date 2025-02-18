@@ -19,7 +19,7 @@ class Document(BaseModel):
     """Represents a document stored in MongoDB documents collection"""
 
     external_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    owner: Dict[str, str]
+    owner_id: str  # This will store the username
     content_type: str
     filename: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -35,9 +35,6 @@ class Document(BaseModel):
     """metadata such as creation date etc."""
     additional_metadata: Dict[str, Any] = Field(default_factory=dict)
     """metadata to help with querying eg. frame descriptions and time-stamped transcript for videos"""
-    access_control: Dict[str, List[str]] = Field(
-        default_factory=lambda: {"readers": [], "writers": [], "admins": []}
-    )
     chunk_ids: List[str] = Field(default_factory=list)
 
     def __hash__(self):

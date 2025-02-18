@@ -151,19 +151,11 @@ class DocumentService:
         rules: Optional[List[str]] = None,
     ) -> Document:
         """Ingest a text document."""
-        if "write" not in auth.permissions:
-            logger.error(f"User {auth.entity_id} does not have write permission")
-            raise PermissionError("User does not have write permission")
 
         doc = Document(
             content_type="text/plain",
             metadata=metadata or {},
-            owner={"type": auth.entity_type, "id": auth.entity_id},
-            access_control={
-                "readers": [auth.entity_id],
-                "writers": [auth.entity_id],
-                "admins": [auth.entity_id],
-            },
+            owner_id=auth.user_id,
         )
         logger.info(f"Created text document record with ID {doc.external_id}")
 
@@ -209,8 +201,6 @@ class DocumentService:
         rules: Optional[List[str]] = None,
     ) -> Document:
         """Ingest a file document."""
-        if "write" not in auth.permissions:
-            raise PermissionError("User does not have write permission")
 
         # Parse file content and extract chunks
         file_content = await file.read()
@@ -242,12 +232,7 @@ class DocumentService:
             content_type=file.content_type or "",
             filename=file.filename,
             metadata=metadata,
-            owner={"type": auth.entity_type, "id": auth.entity_id},
-            access_control={
-                "readers": [auth.entity_id],
-                "writers": [auth.entity_id],
-                "admins": [auth.entity_id],
-            },
+            owner_id=auth.user_id, 
             additional_metadata=additional_metadata,
         )
 

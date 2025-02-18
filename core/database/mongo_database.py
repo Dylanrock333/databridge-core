@@ -33,10 +33,7 @@ class MongoDatabase(BaseDatabase):
         try:
             # Create indexes for common queries
             await self.collection.create_index("external_id", unique=True)
-            await self.collection.create_index("owner.id")
-            await self.collection.create_index("access_control.readers")
-            await self.collection.create_index("access_control.writers")
-            await self.collection.create_index("access_control.admins")
+            await self.collection.create_index("owner_id")
             await self.collection.create_index("system_metadata.created_at")
 
             logger.info("MongoDB indexes created successfully")
@@ -149,11 +146,12 @@ class MongoDatabase(BaseDatabase):
     async def find_authorized_and_filtered_documents(
         self, auth: AuthContext, filters: Optional[Dict[str, Any]] = None
     ) -> List[str]:
-        """Find document IDs matching filters and access permissions."""
+        """Find document IDs matching filters."""
         # Build query
-        auth_filter = self._build_access_filter(auth)
-        metadata_filter = self._build_metadata_filter(filters)
-        query = {"$and": [auth_filter, metadata_filter]} if metadata_filter else auth_filter
+        query = {"owner_id": auth.user_id}  # Simple ownership check
+        if filters:
+            metadata_filter = self._build_metadata_filter(filters)
+            query.update(metadata_filter)
 
         # Get matching document IDs
         cursor = self.collection.find(query, {"external_id": 1})
@@ -164,30 +162,17 @@ class MongoDatabase(BaseDatabase):
 
         return document_ids
 
+    # TODO: See if this method is needed.
     async def check_access(
-        self, document_id: str, auth: AuthContext, required_permission: str = "read"
+        self, document_id: str, auth: AuthContext
     ) -> bool:
-        """Check if user has required permission for document."""
+        """Check if user owns the document."""
         try:
             doc = await self.collection.find_one({"external_id": document_id})
             if not doc:
                 return False
-
-            access_control = doc.get("access_control", {})
-
-            # Check owner access
-            owner = doc.get("owner", {})
-            if owner.get("type") == auth.entity_type and owner.get("id") == auth.entity_id:
-                return True
-
-            # Check permission-specific access
-            permission_map = {"read": "readers", "write": "writers", "admin": "admins"}
-
-            permission_set = permission_map.get(required_permission)
-            if not permission_set:
-                return False
-
-            return auth.entity_id in access_control.get(permission_set, set())
+            
+            return doc.get("owner_id") == auth.user_id  # Simple ownership check
 
         except PyMongoError as e:
             logger.error(f"Error checking document access: {str(e)}")
@@ -195,29 +180,7 @@ class MongoDatabase(BaseDatabase):
 
     def _build_access_filter(self, auth: AuthContext) -> Dict[str, Any]:
         """Build MongoDB filter for access control."""
-        base_filter = {
-            "$or": [
-                {"owner.id": auth.entity_id},
-                {"access_control.readers": auth.entity_id},
-                {"access_control.writers": auth.entity_id},
-                {"access_control.admins": auth.entity_id},
-            ]
-        }
-
-        if auth.entity_type == EntityType.DEVELOPER:
-            # Add app-specific access for developers
-            base_filter["$or"].append({"access_control.app_access": auth.app_id})
-
-        return base_filter
-
-    def _build_metadata_filter(self, filters: Dict[str, Any]) -> Dict[str, Any]:
-        """Build MongoDB filter for metadata."""
-        if not filters:
-            return {}
-        filter_dict = {}
-        for key, value in filters.items():
-            filter_dict[f"metadata.{key}"] = value
-        return filter_dict
+        return {"owner_id": auth.user_id}  # Simple ownership filter
 
     async def store_cache_metadata(self, name: str, metadata: Dict[str, Any]) -> bool:
         """Store metadata for a cache in MongoDB.

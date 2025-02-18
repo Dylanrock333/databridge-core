@@ -4,7 +4,7 @@ from datetime import datetime, UTC
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, String, Index, select, text
+from sqlalchemy import Column, String, Index, select, text, and_
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base_database import BaseDatabase
@@ -21,20 +21,18 @@ class DocumentModel(Base):
     __tablename__ = "documents"
 
     external_id = Column(String, primary_key=True)
-    owner = Column(JSONB)
+    owner_id = Column(String)
     content_type = Column(String)
     filename = Column(String, nullable=True)
     doc_metadata = Column(JSONB, default=dict)
     storage_info = Column(JSONB, default=dict)
     system_metadata = Column(JSONB, default=dict)
     additional_metadata = Column(JSONB, default=dict)
-    access_control = Column(JSONB, default=dict)
     chunk_ids = Column(JSONB, default=list)
 
     # Create indexes
     __table_args__ = (
-        Index("idx_owner_id", "owner", postgresql_using="gin"),
-        Index("idx_access_control", "access_control", postgresql_using="gin"),
+        Index("idx_owner_id", "owner_id", postgresql_using="gin"),
         Index("idx_system_metadata", "system_metadata", postgresql_using="gin"),
     )
 
@@ -137,14 +135,13 @@ class PostgresDatabase(BaseDatabase):
                     # Convert doc_metadata back to metadata
                     doc_dict = {
                         "external_id": doc_model.external_id,
-                        "owner": doc_model.owner,
+                        "owner_id": doc_model.owner_id,
                         "content_type": doc_model.content_type,
                         "filename": doc_model.filename,
                         "metadata": doc_model.doc_metadata,
                         "storage_info": doc_model.storage_info,
                         "system_metadata": doc_model.system_metadata,
                         "additional_metadata": doc_model.additional_metadata,
-                        "access_control": doc_model.access_control,
                         "chunk_ids": doc_model.chunk_ids,
                     }
                     return Document(**doc_dict)
@@ -180,14 +177,13 @@ class PostgresDatabase(BaseDatabase):
                 return [
                     Document(
                         external_id=doc.external_id,
-                        owner=doc.owner,
+                        owner_id=doc.owner_id,
                         content_type=doc.content_type,
                         filename=doc.filename,
                         metadata=doc.doc_metadata,
                         storage_info=doc.storage_info,
                         system_metadata=doc.system_metadata,
                         additional_metadata=doc.additional_metadata,
-                        access_control=doc.access_control,
                         chunk_ids=doc.chunk_ids,
                     )
                     for doc in doc_models
@@ -232,7 +228,7 @@ class PostgresDatabase(BaseDatabase):
     async def delete_document(self, document_id: str, auth: AuthContext) -> bool:
         """Delete document if user has admin access."""
         try:
-            if not await self.check_access(document_id, auth, "admin"):
+            if not await self.check_access(document_id, auth):
                 return False
 
             async with self.async_session() as session:
@@ -254,60 +250,37 @@ class PostgresDatabase(BaseDatabase):
     async def find_authorized_and_filtered_documents(
         self, auth: AuthContext, filters: Optional[Dict[str, Any]] = None
     ) -> List[str]:
-        """Find document IDs matching filters and access permissions."""
+        """Find document IDs matching filters and user ownership."""
         try:
             async with self.async_session() as session:
-                # Build query
-                access_filter = self._build_access_filter(auth)
-                metadata_filter = self._build_metadata_filter(filters)
-
-                logger.debug(f"Access filter: {access_filter}")
-                logger.debug(f"Metadata filter: {metadata_filter}")
-                logger.debug(f"Original filters: {filters}")
-
-                query = select(DocumentModel.external_id).where(text(f"({access_filter})"))
-                if metadata_filter:
-                    query = query.where(text(metadata_filter))
-
-                logger.debug(f"Final query: {query}")
-
+                query = select(DocumentModel.external_id).where(
+                    DocumentModel.owner_id == auth.user_id  # Simple ownership check
+                )
+                
+                if filters:
+                    for key, value in filters.items():
+                        query = query.where(DocumentModel.metadata[key].astext == str(value))
+                
                 result = await session.execute(query)
-                doc_ids = [row[0] for row in result.all()]
-                logger.debug(f"Found document IDs: {doc_ids}")
-                return doc_ids
-
+                return [row[0] for row in result]
         except Exception as e:
             logger.error(f"Error finding authorized documents: {str(e)}")
             return []
-
+        
     async def check_access(
-        self, document_id: str, auth: AuthContext, required_permission: str = "read"
+        self, document_id: str, auth: AuthContext
     ) -> bool:
-        """Check if user has required permission for document."""
+        """Check if user owns the document."""
         try:
             async with self.async_session() as session:
-                result = await session.execute(
-                    select(DocumentModel).where(DocumentModel.external_id == document_id)
+                query = select(DocumentModel).where(
+                    and_(
+                        DocumentModel.external_id == document_id,
+                        DocumentModel.owner_id == auth.user_id  # Simple ownership check
+                    )
                 )
-                doc_model = result.scalar_one_or_none()
-
-                if not doc_model:
-                    return False
-
-                # Check owner access
-                owner = doc_model.owner
-                if owner.get("type") == auth.entity_type and owner.get("id") == auth.entity_id:
-                    return True
-
-                # Check permission-specific access
-                access_control = doc_model.access_control
-                permission_map = {"read": "readers", "write": "writers", "admin": "admins"}
-                permission_set = permission_map.get(required_permission)
-
-                if not permission_set:
-                    return False
-
-                return auth.entity_id in access_control.get(permission_set, [])
+                result = await session.execute(query)
+                return result.scalar_one_or_none() is not None
 
         except Exception as e:
             logger.error(f"Error checking document access: {str(e)}")
@@ -315,18 +288,7 @@ class PostgresDatabase(BaseDatabase):
 
     def _build_access_filter(self, auth: AuthContext) -> str:
         """Build PostgreSQL filter for access control."""
-        filters = [
-            f"owner->>'id' = '{auth.entity_id}'",
-            f"access_control->'readers' ? '{auth.entity_id}'",
-            f"access_control->'writers' ? '{auth.entity_id}'",
-            f"access_control->'admins' ? '{auth.entity_id}'",
-        ]
-
-        if auth.entity_type == "DEVELOPER" and auth.app_id:
-            # Add app-specific access for developers
-            filters.append(f"access_control->'app_access' ? '{auth.app_id}'")
-
-        return " OR ".join(filters)
+        return f"owner_id = '{auth.user_id}'" 
 
     def _build_metadata_filter(self, filters: Dict[str, Any]) -> str:
         """Build PostgreSQL filter for metadata."""
