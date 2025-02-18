@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 -- Create indexes for documents table
-CREATE INDEX IF NOT EXISTS idx_owner_id ON documents USING gin(owner);
+CREATE INDEX IF NOT EXISTS idx_owner_id ON documents USING btree(owner_id);
 CREATE INDEX IF NOT EXISTS idx_system_metadata ON documents USING gin(system_metadata);
 
 -- Create vector_embeddings table
